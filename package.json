@@ -1,6 +1,6 @@
 {
   "name": "@tim-riep/node-xslt",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "XSLT 3.0 / XPath 3.1 / XSD 1.0-1.1 for Node.js, powered by the go-xslt engine compiled to WebAssembly.",
   "type": "module",
   "main": "./dist/index.cjs",
