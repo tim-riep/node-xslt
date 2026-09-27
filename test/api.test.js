@@ -43,6 +43,18 @@ test("transform: stylesheet parameters", async () => {
   assert.match(res.output, /Hello, Tim!/);
 });
 
+test("transform: initialTemplate invokes a named template with no source document", async () => {
+  const res = await transform({
+    stylesheet: `<?xml version="1.0"?>
+<xsl:stylesheet version="3.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
+  <xsl:template name="entry"><out>from named template</out></xsl:template>
+</xsl:stylesheet>`,
+    initialTemplate: "entry",
+  });
+  assert.equal(hasErrors(res), false);
+  assert.match(res.output, /from named template/);
+});
+
 test("transform: compile error surfaces as a diagnostic, not a throw", async () => {
   const res = await transform({
     stylesheet: "<not-a-stylesheet/>",
