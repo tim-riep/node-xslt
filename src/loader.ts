@@ -93,7 +93,7 @@ async function loadBridge(): Promise<GoXsltBridge> {
   // reported as diagnostics, never a crash) surfaces here instead of as an
   // unhandled rejection.
   go.run(instance).catch((err: unknown) => {
-    console.error("node-xslt: wasm runtime exited unexpectedly", err);
+    console.error("@tim-riep/node-xslt: wasm runtime exited unexpectedly", err);
   });
 
   await ready;

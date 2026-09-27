@@ -1,4 +1,4 @@
-# node-xslt
+# @tim-riep/node-xslt
 
 XSLT 3.0 / XPath 3.1 / XSD 1.0–1.1 for Node.js — a Node package around the
 [go-xslt](https://github.com/tim-riep/go-xslt) engine, compiled to
@@ -19,13 +19,13 @@ WebAssembly and run in-process (no native addon, no subprocess, no libxml2).
 ## Install
 
 ```sh
-npm install node-xslt
+npm install @tim-riep/node-xslt
 ```
 
 ## Usage
 
 ```ts
-import { transform, evalXPath, validate, hasErrors } from "node-xslt";
+import { transform, evalXPath, validate, hasErrors } from "@tim-riep/node-xslt";
 
 const res = await transform({
   stylesheet: `<?xml version="1.0"?>
@@ -72,7 +72,7 @@ behind, the engine itself pauses serializing until the consumer catches up.
 ```ts
 import { createWriteStream } from "node:fs";
 import { pipeline } from "node:stream/promises";
-import { transformStream, hasErrors } from "node-xslt";
+import { transformStream, hasErrors } from "@tim-riep/node-xslt";
 
 const { output, result } = transformStream({ stylesheet, source, baseDir });
 await pipeline(output, createWriteStream("out.xml"));
@@ -200,13 +200,13 @@ version.
 
 ```sh
 # 1. bump "version" in package.json to match the tag you're about to push
-npm version 0.2.0 --no-git-tag-version
-git commit -am "release v0.2.0"
+npm version 0.0.2 --no-git-tag-version
+git commit -am "release v0.0.2"
 git push
 
 # 2. tag and push — this triggers the release workflow
-git tag v0.2.0
-git push origin v0.2.0
+git tag v0.0.2
+git push origin v0.0.2
 ```
 
 Publishing uses npm's **trusted publishing** (OIDC) rather than a long-lived
