@@ -1,0 +1,17 @@
+node-xslt
+Copyright 2026 Tim Riep
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+--------------------------------------------------------------------------------
+Third-party components
+
+This package's dist/wasm/go-xslt.wasm is a WebAssembly build of the engine
+from github.com/tim-riep/go-xslt (Apache-2.0, Copyright 2026 Tim Riep), which
+in turn depends on golang.org/x/text (BSD-3-Clause). The dist/wasm/wasm_exec.cjs
+loader glue is vendored unmodified from the Go project's
+lib/wasm/wasm_exec.js (BSD-3-Clause, Copyright 2018 The Go Authors).
+
+  - github.com/tim-riep/go-xslt ....................... Apache-2.0
+  - golang.org/x/text .................................. BSD-3-Clause
+  - Go (wasm_exec.js glue) ............................. BSD-3-Clause

@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        # macOS and Linux only: scripts/build-wasm.sh is a bash script, and
+        # while GitHub's windows-latest runners do ship a bash, its Windows
+        # GOROOT path (backslash-separated) isn't verified to survive that
+        # script's path handling. Worth adding once that's sorted out — the
+        # whole point of shipping one .wasm is that it runs identically
+        # everywhere Node does.
+        os: [ubuntu-latest, macos-latest]
+        node-version: ["20", "22"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go/go.mod
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check
+        run: npx tsc --noEmit
+
+      # Builds first via the package's own "pretest" script (tsup for
+      # src/ -> dist/*.js, go build for go/ -> dist/wasm/*), then runs the
+      # test suite against that build.
+      - name: Build and test
+        run: npm test

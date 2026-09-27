@@ -1,0 +1,7 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+
+# Go build cache/tooling artifacts local to the wasm binding module
+go/go.sum.bak
