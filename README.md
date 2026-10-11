@@ -269,13 +269,13 @@ file that exits non-zero.
 
 ```sh
 # 1. bump "version" in package.json to match the tag you're about to push
-npm version 0.1.1 --no-git-tag-version
-git commit -am "release v0.1.1"
+npm version 0.1.3 --no-git-tag-version
+git commit -am "release v0.1.3"
 git push
 
 # 2. tag and push — this triggers the release workflow
-git tag v0.1.1
-git push origin v0.1.1
+git tag v0.1.3
+git push origin v0.1.3
 ```
 
 Publishing uses npm's **trusted publishing** (OIDC) rather than a long-lived
