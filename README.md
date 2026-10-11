@@ -173,14 +173,6 @@ the current machine you get an error naming the platform.
 - **Linux musl (Alpine)** is not supported: the libraries are built against
   glibc (on Ubuntu 22.04 runners, to stay loadable on as many distributions as
   possible).
-- **Windows — known gap (go-xslt v0.0.6):** everything passes on both Windows
-  targets (library loading, the process pool, streaming and backpressure,
-  XPath, XSD) except file access relative to `baseDir` — `document()`,
-  `doc()`, `xsl:include`/`xsl:import`, and so on. go-xslt builds
-  `file://C:/…` instead of `file:///C:/…`, `net/url` then reads `C:` as the
-  host and drops the drive letter, and the lookup fails with
-  `FODC0002`/`XTDE1460`. It's an engine fix, not something this wrapper can
-  work around; remove this note once go-xslt has it.
 
 ## How it works
 
@@ -291,13 +283,13 @@ shell one-liners so they behave the same on Windows.
 
 ```sh
 # 1. bump "version" in package.json to match the tag you're about to push
-npm version 0.1.3 --no-git-tag-version
-git commit -am "release v0.1.3"
+npm version 0.2.1 --no-git-tag-version
+git commit -am "release v0.2.1"
 git push
 
 # 2. tag and push — this triggers the release workflow
-git tag v0.1.3
-git push origin v0.1.3
+git tag v0.2.1
+git push origin v0.2.1
 ```
 
 Publishing uses npm's **trusted publishing** (OIDC) rather than a long-lived
