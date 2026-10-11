@@ -1,0 +1,127 @@
+name: Build and test (reusable)
+
+# Shared by ci.yml and release.yml. cgo can't reliably cross-compile from a
+# different host OS, so every target is built on a native runner: first the
+# native library per platform ("native" job, uploaded as an artifact), then
+# the JS test suite against that exact artifact on that same platform for
+# each requested Node version ("test" job). release.yml's publish job picks
+# the artifacts up from here.
+on:
+  workflow_call:
+    inputs:
+      node-versions:
+        description: JSON array of Node versions to run the tests on
+        type: string
+        default: '["20", "22"]'
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    name: native ${{ matrix.key }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # 22.04 rather than latest: the Linux libraries link dynamically
+          # against the runner's glibc, so building on an older one keeps
+          # them loadable on more distributions.
+          - { key: linux-x64, os: ubuntu-22.04 }
+          - { key: linux-arm64, os: ubuntu-22.04-arm }
+          - { key: darwin-arm64, os: macos-15 }
+          - { key: darwin-x64, os: macos-15-intel }
+          - { key: win32-x64, os: windows-2022 }
+          - { key: win32-arm64, os: windows-11-arm }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      # Without this the dylib records the runner's (newest) macOS as its
+      # minimum and refuses to load on older ones.
+      MACOSX_DEPLOYMENT_TARGET: "12.0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: native/go.mod
+          cache-dependency-path: native/go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # cgo needs a C compiler for the target. gcc/clang come with the
+      # Linux/macOS runners and (as MinGW) the x64 Windows one; there is no
+      # aarch64 Windows gcc, so use llvm-mingw's native arm64 toolchain.
+      - name: Install llvm-mingw (C compiler for windows/arm64)
+        if: matrix.key == 'win32-arm64'
+        shell: pwsh
+        run: |
+          $tag = "20261006"
+          $zip = "llvm-mingw-$tag-ucrt-aarch64.zip"
+          Invoke-WebRequest "https://github.com/mstorsjo/llvm-mingw/releases/download/$tag/$zip" -OutFile $zip
+          Expand-Archive $zip -DestinationPath $env:RUNNER_TEMP
+          $bin = Join-Path $env:RUNNER_TEMP "llvm-mingw-$tag-ucrt-aarch64\bin"
+          $bin | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+          "CC=aarch64-w64-mingw32-clang" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+
+      - name: Toolchain
+        run: |
+          go version
+          go env GOOS GOARCH
+          "${CC:-gcc}" --version | head -n 2
+
+      - name: Build native library
+        run: node scripts/build-native.mjs
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.key }}
+          path: dist/native/*
+          if-no-files-found: error
+
+  test:
+    name: test ${{ matrix.key }} / node ${{ matrix.node }}
+    needs: native
+    strategy:
+      fail-fast: false
+      matrix:
+        key: [linux-x64, linux-arm64, darwin-arm64, darwin-x64, win32-x64, win32-arm64]
+        node: ${{ fromJSON(inputs.node-versions) }}
+        include:
+          - { key: linux-x64, os: ubuntu-22.04 }
+          - { key: linux-arm64, os: ubuntu-22.04-arm }
+          - { key: darwin-arm64, os: macos-15 }
+          - { key: darwin-x64, os: macos-15-intel }
+          - { key: win32-x64, os: windows-2022 }
+          - { key: win32-arm64, os: windows-11-arm }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run build:js
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: native-${{ matrix.key }}
+          path: dist/native
+
+      - name: Type-check
+        if: matrix.key == 'linux-x64' && matrix.node == '22'
+        run: npx tsc --noEmit
+
+      - name: Test
+        run: node test/run-all.mjs

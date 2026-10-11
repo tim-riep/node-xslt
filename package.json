@@ -15,18 +15,19 @@
   },
   "files": [
     "dist",
+    "!dist/native",
     "NOTICE"
   ],
   "engines": {
     "node": ">=20"
   },
   "scripts": {
-    "build:native": "bash scripts/build-native.sh",
+    "build:native": "node scripts/build-native.mjs",
     "build:js": "tsup",
     "build": "npm run build:js && npm run build:native",
     "pretest": "npm run build",
-    "test": "for f in test/*.test.js; do node \"$f\" || exit 1; done",
-    "prepublishOnly": "npm run build"
+    "test": "node test/run-all.mjs",
+    "prepublishOnly": "npm run build:js"
   },
   "keywords": [
     "xslt",

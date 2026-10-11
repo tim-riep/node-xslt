@@ -1,7 +1,13 @@
 name: Release
 
-# Fires on any tag starting with "v" (v0.1.0, v1.2.3, ...). Push a tag to
+# Fires on any tag starting with "v" (v0.2.0, v1.2.3, ...). Push a tag to
 # release: git tag vX.Y.Z && git push origin vX.Y.Z.
+#
+# Builds the native library on a native runner per platform (_build.yml) and
+# tests each one, then publishes one package per platform
+# (@tim-riep/node-xslt-<platform>-<arch>, each holding just that library)
+# followed by the main package, which lists them as optionalDependencies at
+# the same version so npm installs only the one matching the machine.
 on:
   push:
     tags:
@@ -12,30 +18,10 @@ permissions:
   id-token: write # OIDC token for npm trusted publishing
 
 jobs:
-  release:
+  verify:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          # Reads the version constraint straight from the native export
-          # module (native/go.mod), so it can't drift from what the build
-          # actually needs.
-          go-version-file: native/go.mod
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          # npm trusted publishing needs npm >= 11.5.1, which needs Node >=
-          # 22.14 to come bundled; the extra `npm install -g` below pins the
-          # npm CLI version explicitly instead of trusting whatever a given
-          # Node build happens to bundle.
-          node-version: "22"
-          registry-url: https://registry.npmjs.org
-          cache: npm
+      - uses: actions/checkout@v4
 
       - name: Verify tag matches package.json version
         run: |
@@ -46,37 +32,75 @@ jobs:
             exit 1
           fi
 
+  build:
+    needs: verify
+    uses: ./.github/workflows/_build.yml
+    with:
+      node-versions: '["22"]'
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # npm trusted publishing needs npm >= 11.5.1, which needs Node >=
+          # 22.14 to come bundled; the extra `npm install -g` below pins the
+          # npm CLI version explicitly instead of trusting whatever a given
+          # Node build happens to bundle.
+          node-version: "22"
+          registry-url: https://registry.npmjs.org
+          cache: npm
+
       - name: Ensure a trusted-publishing-capable npm CLI
         run: npm install -g npm@^11.5.1
 
-      - name: Install dependencies
-        run: npm ci
+      - run: npm ci
 
-      # `npm test` builds first via the package's own "pretest" script
-      # (tsup for src/ -> dist/*.js, go build -buildmode=c-shared for
-      # native/ -> dist/native/*), then runs the test suite against that
-      # build.
+      - run: npm run build:js
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: native-*
+          path: artifacts
+
+      - name: Assemble the per-platform packages
+        run: node scripts/prepare-release.mjs platform-packages artifacts platform-packages
+
+      # Authenticates via GitHub's OIDC token (the id-token: write permission
+      # above) instead of an NPM_TOKEN secret — npm's "trusted publishing" —
+      # which each of these packages needs configured on npmjs.com first
+      # (package Settings -> Trusted Publisher -> GitHub Actions, this repo,
+      # workflow filename "release.yml"; see README, "One-time npm setup").
+      # Provenance attestations are generated automatically.
       #
-      # KNOWN GAP: this job runs on ubuntu-latest only, so the published
-      # tarball contains just the linux-x64 native library — the package
-      # will fail to load on macOS/Windows until this becomes a real build
-      # matrix (one native runner per target platform+arch; cgo generally
-      # can't cross-compile from a different host OS) that combines every
-      # platform's dist/native/* before packing. See README's Platform
-      # support section.
-      - name: Build and test
-        run: npm test
+      # A version that's already on the registry is skipped, so re-running
+      # after a partial failure (some platform packages out, main not yet)
+      # picks up where it left off instead of failing on a duplicate publish.
+      - name: Publish platform packages
+        run: |
+          for dir in platform-packages/*/; do
+            name="$(node -p "require('./${dir}package.json').name")"
+            version="$(node -p "require('./${dir}package.json').version")"
+            if curl -fsS -o /dev/null "https://registry.npmjs.org/${name/\//%2F}/${version}"; then
+              echo "$name@$version already published, skipping"
+              continue
+            fi
+            (cd "$dir" && npm publish --access public)
+          done
+
+      # Not committed to the repo on purpose: with optionalDependencies at
+      # unpublished versions in package.json, `npm ci` in development would
+      # fail to resolve them. They only need to exist in the published
+      # manifest.
+      - name: Link the platform packages as optionalDependencies
+        run: node scripts/prepare-release.mjs link-optional-deps
 
       - name: Pack tarball
         run: npm pack
 
-      # Authenticates via GitHub's OIDC token (the id-token: write permission
-      # above) instead of an NPM_TOKEN secret — npm's "trusted publishing".
-      # This requires the package's Trusted Publisher to be configured on
-      # npmjs.com first: package Settings -> Trusted Publisher -> GitHub
-      # Actions, with this repo and the workflow filename "release.yml".
-      # Provenance attestations are generated automatically as part of that
-      # same OIDC exchange, no --provenance flag needed.
       - name: Publish to npm
         run: npm publish --access public
 

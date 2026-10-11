@@ -4,46 +4,11 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
   build-and-test:
-    strategy:
-      fail-fast: false
-      matrix:
-        # macOS and Linux only, both native cgo builds (native/ needs a real
-        # C toolchain for the TARGET platform — it generally can't
-        # cross-compile from a different host OS). Windows needs a working
-        # mingw-w64 setup verified in CI first; see README's Platform
-        # support section for the full list of gaps.
-        os: [ubuntu-latest, macos-latest]
-        node-version: ["20", "22"]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: native/go.mod
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ matrix.node-version }}
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Type-check
-        run: npx tsc --noEmit
-
-      # Builds first via the package's own "pretest" script (tsup for
-      # src/ -> dist/*.js, go build -buildmode=c-shared for native/ ->
-      # dist/native/*), then runs the test suite against that build.
-      - name: Build and test
-        run: npm test
+    uses: ./.github/workflows/_build.yml
