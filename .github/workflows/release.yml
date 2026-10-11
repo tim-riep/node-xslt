@@ -21,10 +21,10 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          # Reads the version constraint straight from the wasm binding
-          # module (go/go.mod), so it can't drift from what the build
+          # Reads the version constraint straight from the native export
+          # module (native/go.mod), so it can't drift from what the build
           # actually needs.
-          go-version-file: go/go.mod
+          go-version-file: native/go.mod
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -53,8 +53,17 @@ jobs:
         run: npm ci
 
       # `npm test` builds first via the package's own "pretest" script
-      # (tsup for src/ -> dist/*.js, go build for go/ -> dist/wasm/*), then
-      # runs the test suite against that build.
+      # (tsup for src/ -> dist/*.js, go build -buildmode=c-shared for
+      # native/ -> dist/native/*), then runs the test suite against that
+      # build.
+      #
+      # KNOWN GAP: this job runs on ubuntu-latest only, so the published
+      # tarball contains just the linux-x64 native library — the package
+      # will fail to load on macOS/Windows until this becomes a real build
+      # matrix (one native runner per target platform+arch; cgo generally
+      # can't cross-compile from a different host OS) that combines every
+      # platform's dist/native/* before packing. See README's Platform
+      # support section.
       - name: Build and test
         run: npm test
 

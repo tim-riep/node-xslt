@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test, summary } from "./harness.mjs";
 import assert from "node:assert/strict";
 import { transform, hasErrors } from "../dist/index.js";
 
@@ -10,7 +10,7 @@ import { transform, hasErrors } from "../dist/index.js";
 // exact timing: the threshold is generous (10x the measured fixed-version
 // time) specifically so it fails on a quadratic regression, not on ordinary
 // CI machine variance.
-test("json-to-xml on a wide flat array stays roughly linear, not quadratic", async () => {
+await test("json-to-xml on a wide flat array stays roughly linear, not quadratic", async () => {
   const n = 80000;
   const items = [];
   for (let i = 0; i < n; i++) items.push({ id: `item-${i}`, n: i * 1.5 });
@@ -37,3 +37,5 @@ test("json-to-xml on a wide flat array stays roughly linear, not quadratic", asy
     `expected roughly linear json-to-xml (<6000ms for n=${n}), got ${res.durationMs}ms — looks quadratic again`,
   );
 });
+
+summary();

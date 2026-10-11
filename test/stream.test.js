@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test, summary } from "./harness.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -13,7 +13,7 @@ const bigStylesheet = `<?xml version="1.0"?>
   </xsl:template>
 </xsl:stylesheet>`;
 
-test("transformStream: byte-identical to the buffered transform() for a large multi-byte document", async () => {
+await test("transformStream: byte-identical to the buffered transform() for a large multi-byte document", async () => {
   const { output, result } = transformStream({
     stylesheet: bigStylesheet,
     source: "<root/>",
@@ -38,7 +38,7 @@ test("transformStream: byte-identical to the buffered transform() for a large mu
   assert.equal(streamed, buffered.output);
 });
 
-test("transformStream: small output still round-trips via output + result", async () => {
+await test("transformStream: small output still round-trips via output + result", async () => {
   const { output, result } = transformStream({
     stylesheet: `<?xml version="1.0"?>
 <xsl:stylesheet version="3.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
@@ -52,7 +52,7 @@ test("transformStream: small output still round-trips via output + result", asyn
   assert.match(text, /<ok>3<\/ok>/);
 });
 
-test("transformStream: backpressure — a slow consumer pauses production", async () => {
+await test("transformStream: backpressure — a slow consumer pauses production", async () => {
   const { output, result } = transformStream({
     stylesheet: bigStylesheet,
     source: "<root/>",
@@ -73,7 +73,7 @@ test("transformStream: backpressure — a slow consumer pauses production", asyn
   assert.ok(received > 0);
 });
 
-test("transformStream: compile error surfaces as a diagnostic on result, not a throw or stream error", async () => {
+await test("transformStream: compile error surfaces as a diagnostic on result, not a throw or stream error", async () => {
   const { output, result } = transformStream({
     stylesheet: "<not-a-stylesheet/>",
     source: "<root/>",
@@ -86,7 +86,7 @@ test("transformStream: compile error surfaces as a diagnostic on result, not a t
   assert.equal(Buffer.concat(chunks).length, 0);
 });
 
-test("transformStream: document() resolves against baseDir via the real filesystem", async () => {
+await test("transformStream: document() resolves against baseDir via the real filesystem", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "node-xslt-stream-"));
   fs.writeFileSync(path.join(dir, "other.xml"), "<r><v>42</v></r>");
   const { output, result } = transformStream({
@@ -103,7 +103,7 @@ test("transformStream: document() resolves against baseDir via the real filesyst
   assert.match(text, /42/);
 });
 
-test("transformStream: destroying output early surfaces as a run diagnostic, not a hang", async () => {
+await test("transformStream: destroying output early surfaces as a run diagnostic, not a hang", async () => {
   const { output, result } = transformStream({
     stylesheet: bigStylesheet,
     source: "<root/>",
@@ -117,3 +117,5 @@ test("transformStream: destroying output early surfaces as a run diagnostic, not
   const meta = await result;
   assert.equal(hasErrors(meta), true);
 });
+
+summary();

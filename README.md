@@ -1,8 +1,11 @@
 # @tim-riep/node-xslt
 
 XSLT 3.0 / XPath 3.1 / XSD 1.0–1.1 for Node.js — a Node package around the
-[go-xslt](https://github.com/tim-riep/go-xslt) engine, compiled to
-WebAssembly and run in-process (no native addon, no subprocess, no libxml2).
+[go-xslt](https://github.com/tim-riep/go-xslt) engine, built as a native
+addon: the Go library compiled to a C shared library
+(`-buildmode=c-shared`), called from Node via [koffi](https://koffi.dev)
+(FFI, no node-gyp/C++ glue to build or ship) inside a small pool of real
+child processes.
 
 - Pure computation in, pure computation out: every call is `async`, takes a
   plain JSON-serializable request, and returns a plain result object. Errors
@@ -11,16 +14,29 @@ WebAssembly and run in-process (no native addon, no subprocess, no libxml2).
   `hasErrors()`).
 - Real filesystem access: `document()`/`doc()`, `xsl:include`/`xsl:import`,
   `xsl:result-document`, and `collection()` all work against the real
-  filesystem via `baseDir`, exactly as in the Go library — the WASM module is
-  wired up to Node's own `fs` module rather than an in-memory stub.
-- One `.wasm` file ships in the package; nothing to compile or download at
-  install time, and it runs the same on macOS/Linux/Windows/arm64/x64.
+  filesystem via `baseDir`, exactly as in the Go library — it's ordinary
+  native Go code, not a sandboxed runtime.
+- Memory is actually released between calls. An earlier WebAssembly build of
+  this package didn't: WASM linear memory can only grow for the life of the
+  process, so repeated large transforms in one long-lived process meant
+  unbounded (eventually crashing) memory growth. This native build runs as
+  ordinary compiled Go in a real OS process — Go's own scavenger returns
+  freed heap pages to the OS the normal way. See
+  [How it works](#how-it-works) for what that's built on.
+- Real concurrency: each call in the pool runs on its own OS process, not a
+  single-threaded interpreter — multiple transforms genuinely run in
+  parallel.
 
 ## Install
 
 ```sh
 npm install @tim-riep/node-xslt
 ```
+
+Requires a native build of `native/` for your platform (see
+[Building from source](#building-from-source)) — this repository does not
+yet publish prebuilt binaries for every platform; see
+[Platform support](#platform-support).
 
 ## Usage
 
@@ -62,12 +78,12 @@ interface TransformRequest {
 
 Like `transform`, but delivers the result as a binary `Readable` (Buffer
 chunks) instead of buffering it into one string — for results large enough
-that holding the whole thing in memory, on either side of the WASM boundary,
-matters. `output` applies real backpressure: if whatever it's piped to falls
-behind, the engine itself pauses serializing until the consumer catches up.
-`result` resolves once the transform finishes, with everything
-`TransformResult` carries except `output` (`diagnostics`, `method`,
-`messages`, `secondaryOutputs`, `durationMs`).
+that holding the whole thing in memory matters. `output` applies real
+backpressure: if whatever it's piped to falls behind, the engine itself
+pauses serializing until the consumer catches up. `result` resolves once the
+transform finishes, with everything `TransformResult` carries except
+`output` (`diagnostics`, `method`, `messages`, `secondaryOutputs`,
+`durationMs`).
 
 ```ts
 import { createWriteStream } from "node:fs";
@@ -82,8 +98,9 @@ if (hasErrors(meta)) console.error(meta.diagnostics);
 
 As with the underlying engine's `TransformTo`, a run-phase error can occur
 after some output has already gone out (e.g. a runtime error deep into a
-large document); the diagnostic still arrives on `result`, and bytes already
-emitted on `output` before that point are the caller's to discard.
+large document); the diagnostic still arrives on `result` (never a
+rejection — destroying `output` early behaves the same way), and bytes
+already emitted on `output` before that point are the caller's to discard.
 
 ### `evalXPath(req): Promise<XPathResult>`
 
@@ -109,9 +126,16 @@ await validate({
 
 ### `ready(): Promise<void>`
 
-Pre-loads and instantiates the WASM engine, so the cost of reading and
-compiling the ~15 MB module happens up front rather than on the first call.
-Every function above lazily loads the engine on first use anyway.
+Pre-loads the child-process pool, so that startup cost happens up front
+rather than on the first call. Every function above lazily loads it on
+first use anyway.
+
+### `close(): Promise<void>`
+
+Terminates the pool's child processes. Not needed for normal use — pool
+children are unref'd and never keep a process alive on their own, and a
+script or server can just exit normally — but useful when something wants
+deterministic, immediate shutdown instead (a short-lived CLI, a test suite).
 
 ### `hasErrors(result): boolean`
 
@@ -127,65 +151,110 @@ these mirror field-for-field.
 
 This package doesn't reimplement any XSLT/XPath/XSD logic — it's a thin
 bridge over the compiled Go engine (JSON in/out for `transform`/`validate`/
-`evalXPath`; JSON in, raw bytes out for `transformStream`). Anything the
+`evalXPath`; raw bytes for `transformStream`'s chunks). Anything the
 underlying `go-xslt` engine doesn't support, this package doesn't support
 either; see that repository's README for XSLT/XPath/XSD conformance status.
 
+## Platform support
+
+`native/` builds one shared library per platform+arch (a `.dylib`, `.so` or
+`.dll`), and the loader (`src/loader.ts`) picks
+`dist/native/goxslt-<platform>-<arch>.<ext>` at runtime based on
+`process.platform`/`process.arch`. Right now this repository only builds and
+ships `darwin-arm64` from local development; a real release needs a build
+matrix (one native runner per target — cgo generally can't cross-compile
+from a different host OS) producing the rest (`darwin-x64`, `linux-x64`,
+`linux-arm64`, `win32-x64`) and bundling or distributing them (e.g. as
+per-platform `optionalDependencies`, the way `esbuild` does it). That CI
+work is a known gap, not yet done.
+
 ## How it works
 
-`go/` is a small Go program (a separate module, depending on
-`github.com/tim-riep/go-xslt`) that registers three functions —
-`transform`, `validate`, `evalXPath` — on `globalThis.__goXslt`, each taking
-a JSON request string and returning a `Promise` that resolves to a JSON
-response string. It's compiled with `GOOS=js GOARCH=wasm` and loaded in Node
-via Go's own `wasm_exec.js` glue (vendored at build time from the local Go
-toolchain, see `scripts/build-wasm.sh`).
+`native/` is a small Go program (a separate module, depending on
+`github.com/tim-riep/go-xslt`) built with `go build -buildmode=c-shared`,
+exporting a plain C ABI: `Transform`/`Validate`/`EvalXPath` (JSON string in,
+JSON string out, freed by the caller via an exported `Free`), and a
+streaming counterpart for `TransformTo` — `TransformToStart`/`Next`/
+`Result`/`Free` — described below. The Go library itself stays cgo-free;
+only this thin export wrapper needs it.
 
-Before loading that glue, the Node-side loader (`src/loader.ts`) sets
-`globalThis.fs = require("node:fs")`. Go's `js/wasm` syscall layer already
-expects a Node-`fs`-shaped object there for real file I/O — the callback
-signatures line up exactly — so this one assignment is what gives
-`document()`/`xsl:include`/`xsl:result-document`/`collection()` real disk
-access instead of failing with `ENOSYS`.
+On the Node side, each pool worker (`src/child.ts`) is a real
+**child_process**, not a `worker_threads.Worker`, and every koffi call in it
+is **synchronous**, never `.func.async()`. Both of those are load-bearing,
+found the hard way:
 
-Each exported Go function runs its actual work on a **new goroutine**,
-returning a JS `Promise` immediately rather than blocking synchronously.
-This matters specifically because of that real file I/O: Go's `js/wasm`
-target can only suspend a goroutine and hand control back to Node's event
-loop (so a pending `fs.read`/`fs.open` callback can actually fire) when that
-goroutine isn't sitting on the same synchronous JS→Go call stack that
-invoked it. A synchronous `js.FuncOf` callback that itself blocks on file I/O
-deadlocks; a `go func() { ...; resolve(...) }()` launched from inside that
-callback does not.
+- koffi's own `.func.async()` leaves its internal worker-pool threads
+  spinning at close to 100% CPU per thread indefinitely after the call
+  completes — reproduced with nothing but one async call against this
+  library, no pool or streaming involved.
+- Loading this same native library inside a `worker_thread` — even calling
+  it purely synchronously, even after `unref()`-ing the worker — leaves the
+  process unable to exit on its own. Reproduced with nothing but
+  `koffi.load()` + one sync call in a worker and no code of ours involved;
+  the identical script run as a real child process exits cleanly in well
+  under a second.
 
-`transformStream` reuses that same mechanism for backpressure. On the Go
-side, `TransformTo` writes through a small `io.Writer` that hands each write
-to Node as a `Uint8Array` (never a per-chunk string — a write boundary isn't
-guaranteed to land on a UTF-8 character boundary, so decoding per chunk could
-split a multi-byte character across two writes; the byte stream is decoded
-whole on the JS side instead). That callback may return a JS `Promise`, and
-the Go side blocks on it before returning from `Write`. The Node wrapper
-returns that promise exactly when `Readable#push()` reports backpressure and
-resolves it only once `_read()` is called again — so a slow consumer (a slow
-disk, a throttled HTTP response) propagates all the way back into the Go
-serializer, which genuinely pauses instead of buffering unboundedly on
-either side of the WASM boundary.
+So: every call is synchronous, and always runs inside a forked child
+process, dispatched from `src/loader.ts`'s small pool over that child's IPC
+channel (`process.send`/`process.on('message')`).
+
+One more thing had to be right for the pool to actually let Node exit
+naturally when idle: **`child.unref()` alone doesn't cover the IPC channel.**
+`ChildProcess#unref()`/`#ref()` toggle whether the *process handle* counts
+toward keeping the event loop alive; the IPC channel underlying
+`send()`/`on('message')` is a *separate* handle (`child.channel`) with its
+own independent ref-count that `child.unref()` does not touch. Skip it and
+a pool child with a persistent message listener (which every pool child
+has, so it can be reused for more than one call) keeps the process alive
+forever even once fully idle and `unref()`'d — reproduced with a single
+forked child, no pool involved. `src/loader.ts`'s `refChild()`/`unrefChild()`
+toggle both together.
+
+(A related, narrower gotcha specific to this package's own test suite, not
+its public behavior: `node:test`'s `test()` wrapping so much as one
+`await`ed call to this library — no assertions, nothing else in the file —
+reproducibly hangs 30–70+ seconds, spinning CPU, before the process exits.
+The identical call without the `node:test` wrapper exits in well under a
+second. `test/harness.mjs` is a ~20-line stand-in that sidesteps it; nothing
+here indicates real programs using this package hit the same thing, since
+they don't run through `node:test`.)
+
+### Streaming
+
+The obvious design for `transformStream` — Go calls back into JS once per
+chunk, blocking on the callback's return value for backpressure — doesn't
+work here: a koffi callback invoked from a background thread only
+synchronizes up to the point the JS function *itself* returns, which for an
+`async` function is its first `await`, not its eventual resolution. Using
+that for backpressure would hand the native side a not-yet-resolved value
+and carry on regardless — exactly the class of bug the synchronous-only
+rule above exists to avoid.
+
+Instead, streaming is **pull-based**: `TransformToStart` runs the transform
+on its own goroutine, writing each chunk into a small buffered Go channel
+(this is what backpressure actually is here — the channel send blocks when
+full, an ordinary goroutine-to-goroutine handoff); `TransformToNext` pulls
+one chunk at a time; `TransformToResult` fetches the final diagnostics/
+metadata once `Next` reports done; `TransformToFree` cancels (if not
+already finished) and releases the handle — always called exactly once,
+whether the stream was read to completion or abandoned early, since an
+abandoned stream's goroutine would otherwise block forever on an unread
+channel send. Nothing in this path ever calls back into JS.
 
 ## Building from source
 
-Requires Go ≥ 1.25 and Node ≥ 20.
+Requires Go ≥ 1.25, a C compiler (cgo, for `native/` only — the underlying
+Go library stays cgo-free), and Node ≥ 20.
 
 ```sh
 npm install
-npm run build   # tsup (TS -> dist/index.{js,cjs,d.ts}) + go build -> dist/wasm/*
+npm run build   # tsup (TS -> dist/{index,child}.{js,cjs,d.ts}) + go build -> dist/native/*
 npm test
 ```
 
-`scripts/build-wasm.sh` copies `wasm_exec.js` from whichever Go toolchain is
-on `PATH` at build time — its import-object shape must match the Go version
-that produced `go-xslt.wasm`, so always run `npm run build` (not the two
-halves against toolchains of different versions) when bumping the Go
-version.
+`npm test` runs each `test/*.test.js` file directly with plain `node` (not
+`node --test` — see the `node:test` gotcha above), stopping at the first
+file that exits non-zero.
 
 ## CI/CD
 
@@ -200,13 +269,13 @@ version.
 
 ```sh
 # 1. bump "version" in package.json to match the tag you're about to push
-npm version 0.0.2 --no-git-tag-version
-git commit -am "release v0.0.2"
+npm version 0.1.1 --no-git-tag-version
+git commit -am "release v0.1.1"
 git push
 
 # 2. tag and push — this triggers the release workflow
-git tag v0.0.2
-git push origin v0.0.2
+git tag v0.1.1
+git push origin v0.1.1
 ```
 
 Publishing uses npm's **trusted publishing** (OIDC) rather than a long-lived
@@ -229,5 +298,5 @@ workflow with no token at all.
 ## License
 
 Apache-2.0, see [LICENSE](./LICENSE). This package bundles a compiled build
-of [go-xslt](https://github.com/tim-riep/go-xslt) (Apache-2.0) and Go's
-`wasm_exec.js` glue (BSD-3-Clause) — see [NOTICE](./NOTICE).
+of [go-xslt](https://github.com/tim-riep/go-xslt) (Apache-2.0) — see
+[NOTICE](./NOTICE).

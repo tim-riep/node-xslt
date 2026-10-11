@@ -1,7 +1,7 @@
 {
   "name": "@tim-riep/node-xslt",
-  "version": "0.0.3",
-  "description": "XSLT 3.0 / XPath 3.1 / XSD 1.0-1.1 for Node.js, powered by the go-xslt engine compiled to WebAssembly.",
+  "version": "0.1.0",
+  "description": "XSLT 3.0 / XPath 3.1 / XSD 1.0-1.1 for Node.js, powered by the go-xslt engine as a native addon.",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -21,11 +21,11 @@
     "node": ">=20"
   },
   "scripts": {
-    "build:wasm": "bash scripts/build-wasm.sh",
+    "build:native": "bash scripts/build-native.sh",
     "build:js": "tsup",
-    "build": "npm run build:js && npm run build:wasm",
+    "build": "npm run build:js && npm run build:native",
     "pretest": "npm run build",
-    "test": "node --test",
+    "test": "for f in test/*.test.js; do node \"$f\" || exit 1; done",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
@@ -35,8 +35,8 @@
     "xpath3",
     "xsd",
     "xml",
-    "wasm",
-    "webassembly"
+    "native",
+    "ffi"
   ],
   "author": "Tim Riep",
   "license": "Apache-2.0",
@@ -48,5 +48,8 @@
     "@types/node": "^22.10.2",
     "tsup": "^8.3.5",
     "typescript": "^5.7.2"
+  },
+  "dependencies": {
+    "koffi": "^3.3.2"
   }
 }

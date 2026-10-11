@@ -1,5 +1,10 @@
 import { Readable } from "node:stream";
-import { getBridge } from "./loader.js";
+import {
+  callSimple,
+  closePool,
+  openStream,
+  ready as poolReady,
+} from "./loader.js";
 import type {
   Diagnostic,
   SecondaryOutput,
@@ -75,8 +80,7 @@ function normalizeStreamMeta(meta: TransformStreamMeta): TransformStreamMeta {
 export async function transform(
   req: TransformRequest,
 ): Promise<TransformResult> {
-  const bridge = await getBridge();
-  const resJSON = await bridge.transform(JSON.stringify(req));
+  const resJSON = await callSimple("transform", JSON.stringify(req));
   return normalizeTransformResult(JSON.parse(resJSON) as TransformResult);
 }
 
@@ -90,8 +94,9 @@ export interface TransformStreamHandle {
    * delivers instead). Never rejects for engine-level problems — a
    * compile/run error still comes back as a diagnostic here, with `output`
    * ending (possibly having already emitted partial data — see the note
-   * below); it can reject if the engine itself fails to load, or if `output`
-   * is destroyed by its consumer before the transform finishes.
+   * below). `output` being destroyed by its consumer before the transform
+   * finishes also comes back as a diagnostic here, not a rejection; this
+   * only rejects if the native worker pool itself fails to start.
    */
   result: Promise<TransformStreamMeta>;
 }
@@ -99,10 +104,11 @@ export interface TransformStreamHandle {
 /**
  * Like {@link transform}, but delivers the serialized result as a stream of
  * chunks instead of buffering it into one string — for results large enough
- * that holding the whole thing in memory (on either side of the WASM
- * boundary) matters. `output` applies real backpressure: if its consumer
- * (e.g. a slow disk `output.pipe()`s to) falls behind, the underlying engine
- * itself pauses serializing until the consumer catches up.
+ * that holding the whole thing in memory matters. `output` applies real
+ * backpressure: if its consumer (e.g. a slow disk `output.pipe()`s to) falls
+ * behind, the underlying engine itself pauses serializing until the consumer
+ * catches up (each next chunk is only pulled from the native side once
+ * `output` has room for it).
  *
  * As with the underlying engine's TransformTo, a run-phase error can occur
  * after some output has already been produced (e.g. a runtime error deep
@@ -134,23 +140,25 @@ export function transformStream(req: TransformRequest): TransformStreamHandle {
     }
   });
 
-  function onChunk(chunk: Uint8Array): void | Promise<void> {
-    if (output.destroyed) {
-      return Promise.reject(
-        new Error("output stream closed before the transform finished"),
-      );
-    }
-    const buf = Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength);
-    if (output.push(buf)) return;
-    return new Promise<void>((resolve, reject) => {
-      pendingDrain = { resolve, reject };
-    });
-  }
-
   const result = (async (): Promise<TransformStreamMeta> => {
+    let session: Awaited<ReturnType<typeof openStream>> | undefined;
     try {
-      const bridge = await getBridge();
-      const resJSON = await bridge.transformTo(JSON.stringify(req), onChunk);
+      session = await openStream(JSON.stringify(req));
+      for (;;) {
+        const chunk = await session.next();
+        if (chunk === null) break;
+        if (output.destroyed) {
+          throw new Error(
+            "output stream closed before the transform finished",
+          );
+        }
+        if (!output.push(chunk)) {
+          await new Promise<void>((resolve, reject) => {
+            pendingDrain = { resolve, reject };
+          });
+        }
+      }
+      const resJSON = await session.result();
       const { output: _output, ...meta } = JSON.parse(
         resJSON,
       ) as TransformResult;
@@ -158,8 +166,34 @@ export function transformStream(req: TransformRequest): TransformStreamHandle {
       return normalizeStreamMeta(meta);
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
-      if (!output.destroyed) output.destroy(error);
+      if (output.destroyed) {
+        // The consumer destroying `output` is what caused this (the inline
+        // check above, or the "close" listener rejecting a pending drain
+        // wait) — an expected abort, not a real failure. Same contract as
+        // the underlying engine's TransformTo when a write fails mid-run:
+        // report it as a diagnostic, not a rejection; bytes already
+        // emitted on `output` are the caller's to discard either way.
+        return normalizeStreamMeta({
+          diagnostics: [
+            {
+              severity: "error",
+              line: 0,
+              col: 0,
+              code: "",
+              message: error.message,
+              phase: "run",
+            },
+          ],
+          durationMs: 0,
+          method: "",
+          messages: [],
+          secondaryOutputs: [],
+        });
+      }
+      output.destroy(error);
       throw error;
+    } finally {
+      await session?.free();
     }
   })();
 
@@ -174,8 +208,7 @@ export function transformStream(req: TransformRequest): TransformStreamHandle {
 export async function validate(
   req: ValidateRequest,
 ): Promise<ValidateResult> {
-  const bridge = await getBridge();
-  const resJSON = await bridge.validate(JSON.stringify(req));
+  const resJSON = await callSimple("validate", JSON.stringify(req));
   return normalizeValidateResult(JSON.parse(resJSON) as ValidateResult);
 }
 
@@ -185,16 +218,26 @@ export async function validate(
  * diagnostics.
  */
 export async function evalXPath(req: XPathRequest): Promise<XPathResult> {
-  const bridge = await getBridge();
-  const resJSON = await bridge.evalXPath(JSON.stringify(req));
+  const resJSON = await callSimple("evalXPath", JSON.stringify(req));
   return normalizeXPathResult(JSON.parse(resJSON) as XPathResult);
 }
 
 /**
- * Pre-loads and instantiates the wasm engine so the first real call doesn't
- * pay that startup cost. Optional — every exported function lazily loads the
- * engine on first use anyway.
+ * Pre-loads the native worker pool so the first real call doesn't pay that
+ * startup cost. Optional — every exported function above lazily loads it on
+ * first use anyway.
  */
 export async function ready(): Promise<void> {
-  await getBridge();
+  await poolReady();
+}
+
+/**
+ * Terminates the pool's child processes and forgets them; the next call
+ * starts a fresh pool. Not needed for normal use — pool children never keep
+ * a process alive on their own, so a script or server can just exit
+ * normally — but useful when something wants deterministic, immediate
+ * shutdown instead (a short-lived CLI, a test suite).
+ */
+export async function close(): Promise<void> {
+  await closePool();
 }
