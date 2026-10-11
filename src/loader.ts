@@ -1,6 +1,5 @@
 import { fork, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
-import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,14 +19,9 @@ import { fileURLToPath } from "node:url";
 // worker_threads or koffi's async calls.
 const here = path.dirname(fileURLToPath(import.meta.url));
 
-// The native library for this platform comes from one of two places:
-//   1. dist/native/ next to this file — a local build (npm run build, or CI
-//      before packing). Wins when present, so a development checkout always
-//      uses what it just built.
-//   2. The per-platform package @tim-riep/node-xslt-<platform>-<arch>, which
-//      this package lists under optionalDependencies. Each of those declares
-//      "os"/"cpu" in its package.json, so npm installs only the one matching
-//      the machine (the same scheme esbuild uses).
+// One package carries the native library for every supported platform under
+// dist/native/ (built per platform in CI, see .github/workflows/_build.yml);
+// pick the one matching this machine.
 function nativeLibPath(): string {
   const key = `${process.platform}-${process.arch}`;
   const ext =
@@ -36,27 +30,16 @@ function nativeLibPath(): string {
       : process.platform === "win32"
         ? "dll"
         : "so";
-  const file = `goxslt-${key}.${ext}`;
-
-  const local = path.join(here, "native", file);
-  if (existsSync(local)) return local;
-
-  const pkg = `@tim-riep/node-xslt-${key}`;
-  try {
-    const manifest = createRequire(import.meta.url).resolve(
-      `${pkg}/package.json`,
-    );
-    return path.join(path.dirname(manifest), file);
-  } catch {
+  const file = path.join(here, "native", `goxslt-${key}.${ext}`);
+  if (!existsSync(file)) {
     throw new Error(
-      `@tim-riep/node-xslt has no native library for ${key}. Supported: ` +
-        `darwin-arm64, darwin-x64, linux-arm64, linux-x64, win32-arm64, ` +
-        `win32-x64 (Linux: glibc only, not musl/Alpine). If ${key} is ` +
-        `supported, the optional dependency ${pkg} was probably not ` +
-        `installed — check for --omit=optional / --no-optional, or a ` +
-        `lockfile generated on a different platform.`,
+      `@tim-riep/node-xslt has no native library for ${key} (looked for ${file}). ` +
+        `Supported: darwin-arm64, darwin-x64, linux-arm64, linux-x64, ` +
+        `win32-arm64, win32-x64 (Linux: glibc only, not musl/Alpine). In a ` +
+        `development checkout, run \`npm run build\` first.`,
     );
   }
+  return file;
 }
 
 interface ChildResponse {

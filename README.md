@@ -33,9 +33,9 @@ child processes.
 npm install @tim-riep/node-xslt
 ```
 
-The native library for your platform arrives automatically as an optional
-dependency (`@tim-riep/node-xslt-<platform>-<arch>`); nothing is compiled at
-install time and no toolchain is needed. See [Platform support](#platform-support).
+The package carries the native library for every supported platform (see
+[Platform support](#platform-support)) and loads the one matching the machine;
+nothing is compiled at install time and no toolchain is needed.
 
 ## Usage
 
@@ -163,14 +163,12 @@ either; see that repository's README for XSLT/XPath/XSD conformance status.
 | Windows | ✓ | ✓ |
 
 The Go library is compiled to one native shared library per platform
-(`.dylib`/`.so`/`.dll`). Each lives in its own package,
-`@tim-riep/node-xslt-<platform>-<arch>`, declaring `os`/`cpu` so npm installs
-only the one matching the machine (the scheme `esbuild` uses). The main
-package lists all six as `optionalDependencies` and `src/loader.ts` resolves
-the right one at runtime; a local `dist/native/` build, if present, wins —
-that is what a development checkout uses. If neither exists you get an error
-naming the platform and the likely cause (`--omit=optional`, or a lockfile
-generated on another OS).
+(`.dylib`/`.so`/`.dll`). All six ship inside the one package, under
+`dist/native/goxslt-<platform>-<arch>.<ext>`, and `src/loader.ts` picks the
+one for `process.platform`/`process.arch`. The trade-off against separate
+per-platform packages is install size: every install downloads all six
+(roughly 9 MB each unpacked) instead of just its own. If neither exists for
+the current machine you get an error naming the platform.
 
 - **Linux musl (Alpine)** is not supported: the libraries are built against
   glibc (on Ubuntu 22.04 runners, to stay loadable on as many distributions as
@@ -286,11 +284,10 @@ shell one-liners so they behave the same on Windows.
   the type-check.
 - **`.github/workflows/release.yml`** — on every pushed tag matching `v*`:
   verifies the tag matches `package.json`'s `version`, runs the above (Node
-  22), then publishes the six platform packages, links them as
-  `optionalDependencies` of the main package at the same version, publishes
-  that, and creates a GitHub release. A platform package already on the
-  registry at that version is skipped, so a re-run after a partial failure
-  resumes instead of failing on a duplicate.
+  22), downloads the six CI-built libraries into `dist/native/`, checks all
+  six are there (`scripts/check-natives.mjs`, which is also the
+  `prepublishOnly` guard — a publish from a checkout that only built its own
+  platform refuses), publishes the one package, and creates a GitHub release.
 
 ```sh
 # 1. bump "version" in package.json to match the tag you're about to push
@@ -308,27 +305,9 @@ Publishing uses npm's **trusted publishing** (OIDC) rather than a long-lived
 npm CLI (pinned to `>=11.5.1` in the workflow — the minimum that supports
 this) exchanges GitHub's OIDC token for a short-lived npm auth token at
 publish time. Provenance attestations come along automatically as part of
-that same exchange.
-
-### One-time npm setup
-
-Trusted Publishing is configured per package, in the package's Settings →
-**Trusted Publisher** on npmjs.com: a GitHub Actions publisher naming this
-repository and the workflow filename `release.yml`. That page only exists for
-a package that already exists, so each brand-new name has to be published once
-by hand first. This applies to the main package and to each of the six
-platform packages:
-
-```sh
-# placeholders (version 0.0.0, no library) just to claim the six names:
-node scripts/prepare-release.mjs placeholders placeholder-packages
-npm login
-for d in placeholder-packages/*/; do (cd "$d" && npm publish --access public); done
-```
-
-Then add the Trusted Publisher (repo `tim-riep/node-xslt`, workflow
-`release.yml`) on each of the six `@tim-riep/node-xslt-<platform>-<arch>`
-package pages. From then on every release is just a tag, with no token.
+that same exchange. The matching Trusted Publisher (repo `tim-riep/node-xslt`,
+workflow `release.yml`) is configured on the package's npmjs.com settings page,
+which is the only npm-side setup there is.
 
 ## License
 

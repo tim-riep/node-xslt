@@ -4,10 +4,8 @@ name: Release
 # release: git tag vX.Y.Z && git push origin vX.Y.Z.
 #
 # Builds the native library on a native runner per platform (_build.yml) and
-# tests each one, then publishes one package per platform
-# (@tim-riep/node-xslt-<platform>-<arch>, each holding just that library)
-# followed by the main package, which lists them as optionalDependencies at
-# the same version so npm installs only the one matching the machine.
+# tests each one, then publishes a single package that carries all six
+# libraries under dist/native/ (the loader picks the one for the machine).
 on:
   push:
     tags:
@@ -59,48 +57,30 @@ jobs:
 
       - run: npm ci
 
+      # tsup wipes dist/, so build the JS first and only then drop the
+      # natives in. (prepublishOnly below only *checks* for them and never
+      # rebuilds, so it can't undo this.)
       - run: npm run build:js
 
       - uses: actions/download-artifact@v4
         with:
           pattern: native-*
-          path: artifacts
+          merge-multiple: true
+          path: dist/native
 
-      - name: Assemble the per-platform packages
-        run: node scripts/prepare-release.mjs platform-packages artifacts platform-packages
-
-      # Authenticates via GitHub's OIDC token (the id-token: write permission
-      # above) instead of an NPM_TOKEN secret — npm's "trusted publishing" —
-      # which each of these packages needs configured on npmjs.com first
-      # (package Settings -> Trusted Publisher -> GitHub Actions, this repo,
-      # workflow filename "release.yml"; see README, "One-time npm setup").
-      # Provenance attestations are generated automatically.
-      #
-      # A version that's already on the registry is skipped, so re-running
-      # after a partial failure (some platform packages out, main not yet)
-      # picks up where it left off instead of failing on a duplicate publish.
-      - name: Publish platform packages
-        run: |
-          for dir in platform-packages/*/; do
-            name="$(node -p "require('./${dir}package.json').name")"
-            version="$(node -p "require('./${dir}package.json').version")"
-            if curl -fsS -o /dev/null "https://registry.npmjs.org/${name/\//%2F}/${version}"; then
-              echo "$name@$version already published, skipping"
-              continue
-            fi
-            (cd "$dir" && npm publish --access public)
-          done
-
-      # Not committed to the repo on purpose: with optionalDependencies at
-      # unpublished versions in package.json, `npm ci` in development would
-      # fail to resolve them. They only need to exist in the published
-      # manifest.
-      - name: Link the platform packages as optionalDependencies
-        run: node scripts/prepare-release.mjs link-optional-deps
+      - name: Check all six native libraries are present
+        run: node scripts/check-natives.mjs
 
       - name: Pack tarball
         run: npm pack
 
+      # Authenticates via GitHub's OIDC token (the id-token: write permission
+      # above) instead of an NPM_TOKEN secret — npm's "trusted publishing".
+      # This requires the package's Trusted Publisher to be configured on
+      # npmjs.com first: package Settings -> Trusted Publisher -> GitHub
+      # Actions, with this repo and the workflow filename "release.yml".
+      # Provenance attestations are generated automatically as part of that
+      # same OIDC exchange, no --provenance flag needed.
       - name: Publish to npm
         run: npm publish --access public
 
