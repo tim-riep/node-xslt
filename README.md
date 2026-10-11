@@ -33,10 +33,9 @@ child processes.
 npm install @tim-riep/node-xslt
 ```
 
-Requires a native build of `native/` for your platform (see
-[Building from source](#building-from-source)) — this repository does not
-yet publish prebuilt binaries for every platform; see
-[Platform support](#platform-support).
+The native library for your platform arrives automatically as an optional
+dependency (`@tim-riep/node-xslt-<platform>-<arch>`); nothing is compiled at
+install time and no toolchain is needed. See [Platform support](#platform-support).
 
 ## Usage
 
@@ -157,16 +156,33 @@ either; see that repository's README for XSLT/XPath/XSD conformance status.
 
 ## Platform support
 
-`native/` builds one shared library per platform+arch (a `.dylib`, `.so` or
-`.dll`), and the loader (`src/loader.ts`) picks
-`dist/native/goxslt-<platform>-<arch>.<ext>` at runtime based on
-`process.platform`/`process.arch`. Right now this repository only builds and
-ships `darwin-arm64` from local development; a real release needs a build
-matrix (one native runner per target — cgo generally can't cross-compile
-from a different host OS) producing the rest (`darwin-x64`, `linux-x64`,
-`linux-arm64`, `win32-x64`) and bundling or distributing them (e.g. as
-per-platform `optionalDependencies`, the way `esbuild` does it). That CI
-work is a known gap, not yet done.
+| | x64 | arm64 |
+|---|---|---|
+| macOS | ✓ | ✓ |
+| Linux (glibc) | ✓ | ✓ |
+| Windows | ✓ | ✓ |
+
+The Go library is compiled to one native shared library per platform
+(`.dylib`/`.so`/`.dll`). Each lives in its own package,
+`@tim-riep/node-xslt-<platform>-<arch>`, declaring `os`/`cpu` so npm installs
+only the one matching the machine (the scheme `esbuild` uses). The main
+package lists all six as `optionalDependencies` and `src/loader.ts` resolves
+the right one at runtime; a local `dist/native/` build, if present, wins —
+that is what a development checkout uses. If neither exists you get an error
+naming the platform and the likely cause (`--omit=optional`, or a lockfile
+generated on another OS).
+
+- **Linux musl (Alpine)** is not supported: the libraries are built against
+  glibc (on Ubuntu 22.04 runners, to stay loadable on as many distributions as
+  possible).
+- **Windows — known gap (go-xslt v0.0.6):** everything passes on both Windows
+  targets (library loading, the process pool, streaming and backpressure,
+  XPath, XSD) except file access relative to `baseDir` — `document()`,
+  `doc()`, `xsl:include`/`xsl:import`, and so on. go-xslt builds
+  `file://C:/…` instead of `file:///C:/…`, `net/url` then reads `C:` as the
+  host and drops the drive letter, and the lookup fails with
+  `FODC0002`/`XTDE1460`. It's an engine fix, not something this wrapper can
+  work around; remove this note once go-xslt has it.
 
 ## How it works
 
@@ -253,19 +269,28 @@ npm test
 ```
 
 `npm test` runs each `test/*.test.js` file directly with plain `node` (not
-`node --test` — see the `node:test` gotcha above), stopping at the first
-file that exits non-zero.
+`node --test` — see the `node:test` gotcha above) and lists every failing
+file at the end. The build and test entry points are Node scripts rather than
+shell one-liners so they behave the same on Windows.
 
 ## CI/CD
 
-- **`.github/workflows/ci.yml`** — on every push to `main` and every PR:
-  type-checks, builds and runs the test suite, on both Linux and macOS
-  across Node 20 and 22 (a 2×2 matrix), so a regression surfaces before it
-  reaches a release tag.
+- **`.github/workflows/_build.yml`** — reusable; shared by the two below.
+  cgo can't reliably cross-compile, so every target is built on a native
+  runner (`ubuntu-22.04`, `ubuntu-22.04-arm`, `macos-15`, `macos-15-intel`,
+  `windows-2022`, `windows-11-arm`; Windows-on-ARM gets llvm-mingw as its C
+  compiler). Each library is uploaded as an artifact, then the test suite
+  runs against that exact artifact on that same platform, per Node version.
+- **`.github/workflows/ci.yml`** — on every push to `main`, every PR, and on
+  demand: the above with Node 20 and 22 (6 platforms × 2 = 12 test jobs), plus
+  the type-check.
 - **`.github/workflows/release.yml`** — on every pushed tag matching `v*`:
-  verifies the tag matches `package.json`'s `version`, builds, tests,
-  `npm publish`es, and creates a GitHub release with the built tarball
-  attached.
+  verifies the tag matches `package.json`'s `version`, runs the above (Node
+  22), then publishes the six platform packages, links them as
+  `optionalDependencies` of the main package at the same version, publishes
+  that, and creates a GitHub release. A platform package already on the
+  registry at that version is skipped, so a re-run after a partial failure
+  resumes instead of failing on a duplicate.
 
 ```sh
 # 1. bump "version" in package.json to match the tag you're about to push
@@ -285,15 +310,25 @@ this) exchanges GitHub's OIDC token for a short-lived npm auth token at
 publish time. Provenance attestations come along automatically as part of
 that same exchange.
 
-One-time setup on npmjs.com, in the package's Settings → **Trusted
-Publisher**: add a GitHub Actions publisher naming this repository and the
-workflow filename `release.yml`. This has to be done through the package's
-own settings page, which means it needs the package to already exist — for
-the very first release of a brand-new package, publish once manually first
-(`npm login && npm publish --access public` from a local checkout after
-`npm run build`), configure the trusted publisher on the now-existing
-package, and every release after that goes through the tag-triggered
-workflow with no token at all.
+### One-time npm setup
+
+Trusted Publishing is configured per package, in the package's Settings →
+**Trusted Publisher** on npmjs.com: a GitHub Actions publisher naming this
+repository and the workflow filename `release.yml`. That page only exists for
+a package that already exists, so each brand-new name has to be published once
+by hand first. This applies to the main package and to each of the six
+platform packages:
+
+```sh
+# placeholders (version 0.0.0, no library) just to claim the six names:
+node scripts/prepare-release.mjs placeholders placeholder-packages
+npm login
+for d in placeholder-packages/*/; do (cd "$d" && npm publish --access public); done
+```
+
+Then add the Trusted Publisher (repo `tim-riep/node-xslt`, workflow
+`release.yml`) on each of the six `@tim-riep/node-xslt-<platform>-<arch>`
+package pages. From then on every release is just a tag, with no token.
 
 ## License
 
