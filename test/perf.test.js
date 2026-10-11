@@ -29,7 +29,7 @@ await test("json-to-xml on a wide flat array stays roughly linear, not quadratic
   </xsl:stylesheet>`;
 
   const res = await transform({ stylesheet, initialTemplate: "main", params: { input } });
-  assert.equal(hasErrors(res), false);
+  assert.equal(hasErrors(res), false, JSON.stringify(res.diagnostics));
   assert.equal(res.output, String(n));
   // Fixed (v0.0.3): ~0.6-1.3s locally. Broken (<=v0.0.2): ~6.4s at this n.
   assert.ok(

@@ -19,7 +19,7 @@ await test("transform: basic template match + XPath arithmetic", async () => {
 </xsl:stylesheet>`,
     source: "<root/>",
   });
-  assert.equal(hasErrors(res), false);
+  assert.equal(hasErrors(res), false, JSON.stringify(res.diagnostics));
   assert.equal(res.output, '<?xml version="1.0" encoding="UTF-8"?><hello>3</hello>');
   assert.equal(res.method, "xml");
   assert.deepEqual(res.messages, []);
@@ -39,7 +39,7 @@ await test("transform: stylesheet parameters", async () => {
     source: "<root/>",
     params: { name: "Tim" },
   });
-  assert.equal(hasErrors(res), false);
+  assert.equal(hasErrors(res), false, JSON.stringify(res.diagnostics));
   assert.match(res.output, /Hello, Tim!/);
 });
 
@@ -51,7 +51,7 @@ await test("transform: initialTemplate invokes a named template with no source d
 </xsl:stylesheet>`,
     initialTemplate: "entry",
   });
-  assert.equal(hasErrors(res), false);
+  assert.equal(hasErrors(res), false, JSON.stringify(res.diagnostics));
   assert.match(res.output, /from named template/);
 });
 
@@ -78,13 +78,13 @@ await test("transform: document() resolves against baseDir via the real filesyst
     source: "<root/>",
     baseDir: dir,
   });
-  assert.equal(hasErrors(res), false);
+  assert.equal(hasErrors(res), false, JSON.stringify(res.diagnostics));
   assert.match(res.output, /42/);
 });
 
 await test("evalXPath: expression with no context item", async () => {
   const res = await evalXPath({ expression: "1 + 2" });
-  assert.equal(hasErrors(res), false);
+  assert.equal(hasErrors(res), false, JSON.stringify(res.diagnostics));
   assert.equal(res.count, 1);
   assert.equal(res.value, "3");
   assert.equal(res.items[0].type, "xs:integer");
@@ -95,7 +95,7 @@ await test("evalXPath: expression against a source document", async () => {
     expression: "/root/child/text()",
     source: "<root><child>hi</child></root>",
   });
-  assert.equal(hasErrors(res), false);
+  assert.equal(hasErrors(res), false, JSON.stringify(res.diagnostics));
   assert.equal(res.value, "hi");
 });
 
@@ -106,7 +106,7 @@ await test("evalXPath: doc() resolves against baseDir via the real filesystem", 
     expression: "doc('other.xml')/r/v/string()",
     baseDir: dir,
   });
-  assert.equal(hasErrors(res), false);
+  assert.equal(hasErrors(res), false, JSON.stringify(res.diagnostics));
   assert.equal(res.value, "42");
 });
 

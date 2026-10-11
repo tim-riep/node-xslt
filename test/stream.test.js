@@ -29,7 +29,7 @@ await test("transformStream: byte-identical to the buffered transform() for a la
   const meta = await result;
   const streamed = Buffer.concat(parts).toString("utf8");
 
-  assert.equal(hasErrors(meta), false);
+  assert.equal(hasErrors(meta), false, JSON.stringify(meta.diagnostics));
   assert.equal(meta.output, undefined);
   assert.equal(meta.method, "xml");
   assert.ok(chunkCount > 1, "expected the large document to arrive in more than one chunk");
@@ -48,7 +48,7 @@ await test("transformStream: small output still round-trips via output + result"
   });
   const text = await streamToString(output);
   const meta = await result;
-  assert.equal(hasErrors(meta), false);
+  assert.equal(hasErrors(meta), false, JSON.stringify(meta.diagnostics));
   assert.match(text, /<ok>3<\/ok>/);
 });
 
@@ -69,7 +69,7 @@ await test("transformStream: backpressure — a slow consumer pauses production"
   output.resume();
 
   const meta = await result;
-  assert.equal(hasErrors(meta), false);
+  assert.equal(hasErrors(meta), false, JSON.stringify(meta.diagnostics));
   assert.ok(received > 0);
 });
 
@@ -99,7 +99,7 @@ await test("transformStream: document() resolves against baseDir via the real fi
   });
   const text = await streamToString(output);
   const meta = await result;
-  assert.equal(hasErrors(meta), false);
+  assert.equal(hasErrors(meta), false, JSON.stringify(meta.diagnostics));
   assert.match(text, /42/);
 });
 
