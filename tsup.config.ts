@@ -6,7 +6,7 @@ export default defineConfig({
   dts: true,
   clean: true,
   sourcemap: true,
-  target: "node20",
+  target: "node22",
   platform: "node",
   // loader.ts uses import.meta.url (to locate dist/native/* and dist/child.js
   // next to the built file); tsup only shims that for the CJS output when

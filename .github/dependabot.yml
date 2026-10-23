@@ -1,0 +1,31 @@
+version: 2
+updates:
+  # The go-xslt engine compiled into the native libraries.
+  - package-ecosystem: gomod
+    directory: /native
+    schedule:
+      interval: daily
+    allow:
+      - dependency-name: github.com/tim-riep/go-xslt
+    commit-message:
+      prefix: deps
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      npm:
+        patterns: ["*"]
+    commit-message:
+      prefix: deps
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci

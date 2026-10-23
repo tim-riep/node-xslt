@@ -272,7 +272,7 @@ shell one-liners so they behave the same on Windows.
   compiler). Each library is uploaded as an artifact, then the test suite
   runs against that exact artifact on that same platform, per Node version.
 - **`.github/workflows/ci.yml`** — on every push to `main`, every PR, and on
-  demand: the above with Node 20 and 22 (6 platforms × 2 = 12 test jobs), plus
+  demand: the above with Node 22 and 24 (6 platforms × 2 = 12 test jobs), plus
   the type-check.
 - **`.github/workflows/release.yml`** — on every pushed tag matching `v*`:
   verifies the tag matches `package.json`'s `version`, runs the above (Node

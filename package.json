@@ -18,7 +18,7 @@
     "NOTICE"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "scripts": {
     "build:native": "node scripts/build-native.mjs",
