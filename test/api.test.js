@@ -138,4 +138,30 @@ await test("validate: invalid instance reports diagnostics, not a throw", async 
   assert.ok(res.diagnostics.length > 0);
 });
 
+// GHSA-3qwg-cpmj-qx68: before go-xslt v0.3.2 nested entities in a DTD expanded
+// without limit, so this few-hundred-byte source hung the call and ate memory.
+await test("transform: billion-laughs entity expansion is refused with a diagnostic, not a hang", async () => {
+  const lols = Array.from({ length: 9 }, (_, i) =>
+    `<!ENTITY lol${i + 1} "${`&lol${i};`.repeat(10)}">`).join("\n");
+  const source = `<?xml version="1.0"?>
+<!DOCTYPE lolz [
+<!ENTITY lol0 "lol">
+${lols}
+]>
+<lolz>&lol9;</lolz>`;
+  const res = await Promise.race([
+    transform({
+      stylesheet: `<?xml version="1.0"?>
+<xsl:stylesheet version="3.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
+  <xsl:template match="/"><out/></xsl:template>
+</xsl:stylesheet>`,
+      source,
+    }),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("entity expansion did not stop within 20s")), 20_000).unref()),
+  ]);
+  assert.equal(hasErrors(res), true);
+  assert.ok(res.diagnostics.length > 0);
+});
+
 summary();
