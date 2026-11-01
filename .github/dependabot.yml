@@ -17,6 +17,11 @@ updates:
     groups:
       npm:
         patterns: ["*"]
+    ignore:
+      # TypeScript 7 (the Go port) has no compiler API yet, which tsup's
+      # declaration build (rollup-plugin-dts) needs. Stay on 6.x until it does.
+      - dependency-name: typescript
+        versions: [">=7.0.0"]
     commit-message:
       prefix: deps
 
