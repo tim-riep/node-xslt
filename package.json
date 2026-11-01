@@ -15,6 +15,7 @@
   },
   "files": [
     "dist",
+    "!dist/native",
     "NOTICE"
   ],
   "engines": {
@@ -26,7 +27,7 @@
     "build": "npm run build:js && npm run build:native",
     "pretest": "npm run build",
     "test": "node test/run-all.mjs",
-    "prepublishOnly": "node scripts/check-natives.mjs"
+    "prepublishOnly": "npm run build:js"
   },
   "keywords": [
     "xslt",
