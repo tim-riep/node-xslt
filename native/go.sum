@@ -1,4 +1,4 @@
-github.com/tim-riep/go-xslt v0.3.9 h1:+MAAC1600zQeVSzW/ucdOCRJEmmPQedAgHTrgdU7zsM=
-github.com/tim-riep/go-xslt v0.3.9/go.mod h1:3szKWhouq2qhHxERIf/VAao8FvsTVvkkAgWvarzGjg8=
+github.com/tim-riep/go-xslt v0.4.2 h1:VGt4NCYK38T+UVSx0nQIsKX+1wZWtqGzfYa78ykjh1Q=
+github.com/tim-riep/go-xslt v0.4.2/go.mod h1:3szKWhouq2qhHxERIf/VAao8FvsTVvkkAgWvarzGjg8=
 golang.org/x/text v0.39.0 h1:UbZz4pLOvn600D6Oh6GGEI6VAmndrEBLv8/6BEXzyus=
 golang.org/x/text v0.39.0/go.mod h1:3UwRclnC2g0TU9x8PZiyfOajCd1zaUNHF9cvqcQZ+ZM=
